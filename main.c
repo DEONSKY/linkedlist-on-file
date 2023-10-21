@@ -61,7 +61,6 @@ Node generateNodeWithData(int seed)
 void printWithOrderFromTillEnd(FILE *persistedData, long startItemIndex)
 {
     fseek(persistedData, startItemIndex * sizeof(Node), SEEK_SET);
-    int index = 0;
     Node nodeBuffer;
 
     //If there is no node different that root, table is empty. Dont print
@@ -77,14 +76,34 @@ void printWithOrderFromTillEnd(FILE *persistedData, long startItemIndex)
         fread(&nodeBuffer, sizeof(Node), 1, persistedData);
         printf("Fullname : %s\n", nodeBuffer.data.szFullName);
         printf("Email : %s\n", nodeBuffer.data.szEmail);
-        printf("Birth Date : %02d/%02d/%d , %d\n",
+        printf("Birth Date : %02d/%02d/%d , %d\n\n",
                nodeBuffer.data.birthdate.sub.day,
                nodeBuffer.data.birthdate.sub.month,
                nodeBuffer.data.birthdate.sub.year,
                nodeBuffer.data.birthdate.dateval);
 
-        index++;
     } while (nodeBuffer.next != 0);
+}
+
+//Gets last element of linked list
+long iterateFilePointerToLastNode (FILE *persistedData){
+    fseek(persistedData, sizeof(Node), SEEK_SET);
+    long next;
+
+    fread(&next, sizeof(long), 1, persistedData);
+    if  (next==0){
+        return 0;
+    }
+
+    long lastItemIndex;
+    do
+    {
+        lastItemIndex=next;
+        fseek(persistedData, next, SEEK_SET);
+        fread(&next, sizeof(long), 1, persistedData);
+
+    } while (next != 0);
+    return lastItemIndex;
 }
 
 int main()
@@ -107,8 +126,9 @@ int main()
         fwrite(&rootCleanNode, sizeof(Node), 1, persistedData);
     }
 
+    
+    long offsetIterator = iterateFilePointerToLastNode(persistedData);
     fseek(persistedData, 0, SEEK_END);
-    long offsetIterator = ftell(persistedData) - sizeof(Node);
 
     // Chained seed data generation
     for (int i = 1; i <= 10; i++)
