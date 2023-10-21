@@ -21,76 +21,115 @@ typedef struct _USER_MODEL
 
 typedef struct Node
 {
+    long next;
     USER_MODEL data;
-    struct Node *next;
 } Node;
 
-void addNodeAfterTargetNode(Node *prevNode, Node *newNode)
+// You must call this function while file pointer was at the end of the file. There is no control for efficency
+void addNodeAfterTargetNode(FILE *persistedData, long prevNodeOffset, Node newNode)
 {
-    newNode->next = prevNode->next;
-    prevNode->next = newNode;
+    long newNodeOffset = ftell(persistedData);
+
+    // Read prev's next for insertion
+    long prevNext;
+    fseek(persistedData, prevNodeOffset, SEEK_SET);
+    fread(&prevNext, sizeof(long), 1, persistedData);
+    newNode.next = prevNext;
+
+    // Update prev new next (node that will be created)
+    fseek(persistedData, prevNodeOffset, SEEK_SET);
+    fwrite(&newNodeOffset, sizeof(long), 1, persistedData);
+
+    // Save created value by prevs next
+    fseek(persistedData, 0, SEEK_END);
+    fwrite(&newNode, sizeof(Node), 1, persistedData);
 }
 
-Node *generateNodeWithData(int seed)
+Node generateNodeWithData(int seed)
 {
-    Node *pNewNode = (Node *)malloc(sizeof(Node));
-    sprintf(pNewNode->data.szFullName, "Fullname_%d", seed);
-    sprintf(pNewNode->data.szEmail, "Email_%d", seed);
-    pNewNode->data.birthdate.sub.day = seed % 29;
-    pNewNode->data.birthdate.sub.month = seed % 11;
-    pNewNode->data.birthdate.sub.year = (seed % 60) + 1960;
-    pNewNode->next = NULL;
+    Node newNode;
+    sprintf(newNode.data.szFullName, "Fullname_%d", seed);
+    sprintf(newNode.data.szEmail, "Email_%d", seed);
+    newNode.data.birthdate.sub.day = seed % 29;
+    newNode.data.birthdate.sub.month = seed % 11;
+    newNode.data.birthdate.sub.year = (seed % 60) + 1960;
+    newNode.next = 0;
 
-    return pNewNode;
+    return newNode;
 }
 
-void printFromTillEnd(Node *startNode)
+void printWithOrderFromTillEnd(FILE *persistedData, long startItemIndex)
 {
-    Node *pItaretor = startNode;
+    fseek(persistedData, startItemIndex * sizeof(Node), SEEK_SET);
     int index = 0;
+    Node nodeBuffer;
+
+    //If there is no node different that root, table is empty. Dont print
+    fread(&nodeBuffer, sizeof(Node), 1, persistedData);
+    if  (nodeBuffer.next==0){
+        return;
+    }
+
+    //Saved items read loop  
     do
     {
-        printf("Fullname : %s\n", pItaretor->data.szFullName);
-        printf("Email : %s\n", pItaretor->data.szEmail);
+        fseek(persistedData, nodeBuffer.next, SEEK_SET);
+        fread(&nodeBuffer, sizeof(Node), 1, persistedData);
+        printf("Fullname : %s\n", nodeBuffer.data.szFullName);
+        printf("Email : %s\n", nodeBuffer.data.szEmail);
         printf("Birth Date : %02d/%02d/%d , %d\n",
-               pItaretor->data.birthdate.sub.day,
-               pItaretor->data.birthdate.sub.month,
-               pItaretor->data.birthdate.sub.year,
-               pItaretor->data.birthdate.dateval);
+               nodeBuffer.data.birthdate.sub.day,
+               nodeBuffer.data.birthdate.sub.month,
+               nodeBuffer.data.birthdate.sub.year,
+               nodeBuffer.data.birthdate.dateval);
 
         index++;
-        pItaretor=pItaretor->next;
-    } while (pItaretor->next != NULL);
+    } while (nodeBuffer.next != 0);
 }
 
 int main()
 {
-    struct Node *head = generateNodeWithData(0);
 
+    FILE *persistedData = fopen("./user-table.deondb", "rb+");
 
-    Node *pItaretor = head;
+    if(persistedData==NULL){
+        persistedData= fopen("./user-table.deondb", "a");
+        fclose(persistedData);
+        persistedData = fopen("./user-table.deondb", "rb+");
+    }
+
+    fseek(persistedData, 0, SEEK_END);
+
+    //I am creating root node with 0 values for preventing extra cases about prev node not exist problem if db is empty. I think this is most efficent way for this scenario
+    if (ftell(persistedData) == 0)
+    {
+        Node rootCleanNode = {0};
+        fwrite(&rootCleanNode, sizeof(Node), 1, persistedData);
+    }
+
+    fseek(persistedData, 0, SEEK_END);
+    long offsetIterator = ftell(persistedData) - sizeof(Node);
+
+    // Chained seed data generation
     for (int i = 1; i <= 10; i++)
     {
 
-        Node* pTempNewNode= generateNodeWithData(i);
-        
-        addNodeAfterTargetNode(pItaretor, pTempNewNode);
-        pItaretor=pTempNewNode;
+        Node tempNewNode = generateNodeWithData(i);
+        addNodeAfterTargetNode(persistedData, offsetIterator, tempNewNode);
+
+        offsetIterator = ftell(persistedData) - sizeof(Node);
     }
-    printFromTillEnd(head);
+    //Add seed data 16 after fourth node
+    Node pTempNewNode;
+    pTempNewNode = generateNodeWithData(16);
+    addNodeAfterTargetNode(persistedData, sizeof(Node)*4, pTempNewNode);
 
-    /*
-    FILE *sourceFile = fopen("./8k.jpg", "rb");
-    FILE *copyFile = fopen("./8kcopy.jpg", "wb");
-    int iterator = fgetc(sourceFile);
-    while (iterator != EOF)
-    {
-        fputc(iterator, copyFile);
-        iterator = fgetc(sourceFile);
-    }
+        //Add seed data 17 after second node
+    pTempNewNode = generateNodeWithData(17);
+    addNodeAfterTargetNode(persistedData, sizeof(Node)*2, pTempNewNode);
 
-    fclose(sourceFile);
-    fclose(copyFile); */
+    printWithOrderFromTillEnd(persistedData, 0);
 
+    fclose(persistedData);
     return 0;
 }

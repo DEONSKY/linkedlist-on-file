@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "chrono": "c",
-        "variant": "c"
+        "variant": "c",
+        "*.tcc": "c"
     }
 }
