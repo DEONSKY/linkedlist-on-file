@@ -26,7 +26,7 @@ typedef struct Node
 } Node;
 
 // You must call this function while file pointer was at the end of the file. There is no control for efficency
-void addNodeAfterTargetNode(FILE *persistedData, long prevNodeOffset, Node newNode)
+void addNodeAfterTargetNode(FILE *persistedData, long prevNodeOffset, Node* newNode)
 {
     long newNodeOffset = ftell(persistedData);
 
@@ -34,7 +34,7 @@ void addNodeAfterTargetNode(FILE *persistedData, long prevNodeOffset, Node newNo
     long prevNext;
     fseek(persistedData, prevNodeOffset, SEEK_SET);
     fread(&prevNext, sizeof(long), 1, persistedData);
-    newNode.next = prevNext;
+    newNode->next = prevNext;
 
     // Update prev new next (node that will be created)
     fseek(persistedData, prevNodeOffset, SEEK_SET);
@@ -42,18 +42,18 @@ void addNodeAfterTargetNode(FILE *persistedData, long prevNodeOffset, Node newNo
 
     // Save created value by prevs next
     fseek(persistedData, 0, SEEK_END);
-    fwrite(&newNode, sizeof(Node), 1, persistedData);
+    fwrite(newNode, sizeof(Node), 1, persistedData);
 }
 
-Node generateNodeWithData(int seed)
+Node* generateNodeWithData(int seed)
 {
-    Node newNode;
-    sprintf(newNode.data.szFullName, "Fullname_%d", seed);
-    sprintf(newNode.data.szEmail, "Email_%d", seed);
-    newNode.data.birthdate.sub.day = seed % 29;
-    newNode.data.birthdate.sub.month = seed % 11;
-    newNode.data.birthdate.sub.year = (seed % 60) + 1960;
-    newNode.next = 0;
+    Node* newNode = malloc(sizeof(Node));
+    sprintf(newNode->data.szFullName, "Fullname_%d", seed);
+    sprintf(newNode->data.szEmail, "Email_%d", seed);
+    newNode->data.birthdate.sub.day = seed % 29;
+    newNode->data.birthdate.sub.month = seed % 11;
+    newNode->data.birthdate.sub.year = (seed % 60) + 1960;
+    newNode->next = 0;
 
     return newNode;
 }
@@ -134,20 +134,20 @@ int main()
     for (int i = 1; i <= 10; i++)
     {
 
-        Node tempNewNode = generateNodeWithData(i);
+        Node* tempNewNode = generateNodeWithData(i);
         addNodeAfterTargetNode(persistedData, offsetIterator, tempNewNode);
-
+        free(tempNewNode);
         offsetIterator = ftell(persistedData) - sizeof(Node);
     }
     //Add seed data 16 after fourth node
-    Node pTempNewNode;
+    Node* pTempNewNode;
     pTempNewNode = generateNodeWithData(16);
     addNodeAfterTargetNode(persistedData, sizeof(Node)*4, pTempNewNode);
-
+    free(pTempNewNode);
         //Add seed data 17 after second node
     pTempNewNode = generateNodeWithData(17);
     addNodeAfterTargetNode(persistedData, sizeof(Node)*2, pTempNewNode);
-
+    free(pTempNewNode);
     printWithOrderFromTillEnd(persistedData, 0);
 
     fclose(persistedData);
