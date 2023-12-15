@@ -1,155 +1,112 @@
 #include <stdio.h>
-#include <stdlib.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <unistd.h>
+#include <pthread.h>
+#define ACTIVE_SOCKET_LIMIT 10
 
-typedef union _DATE
+int iActiveSocketIndex = 0;
+int counter = 0;
+int iaSocketFd[ACTIVE_SOCKET_LIMIT];
+
+pthread_mutex_t lock;
+
+void *handleMessageTask(void *args)
 {
-    struct
+  int iSocketFd = *((int *)args);
+  char szBuffer[1025];
+
+  printf("messages waiting from %d...\n", iSocketFd);
+
+  while (1)
+  {
+    int size = recv(iSocketFd, szBuffer, 1024, 0);
+    if (size == 0)
     {
-        unsigned day : 5;
-        unsigned month : 4;
-        unsigned year : 23;
-    } sub;
-    unsigned int dateval;
-} DATE;
-
-typedef struct _USER_MODEL
-{
-    char szFullName[31];
-    char szEmail[63];
-    DATE birthdate;
-} USER_MODEL;
-
-typedef struct Node
-{
-    long next;
-    USER_MODEL data;
-} Node;
-
-// You must call this function while file pointer was at the end of the file. There is no control for efficency
-void addNodeAfterTargetNode(FILE *persistedData, long prevNodeOffset, Node* newNode)
-{
-    long newNodeOffset = ftell(persistedData);
-
-    // Read prev's next for insertion
-    long prevNext;
-    fseek(persistedData, prevNodeOffset, SEEK_SET);
-    fread(&prevNext, sizeof(long), 1, persistedData);
-    newNode->next = prevNext;
-
-    // Update prev new next (node that will be created)
-    fseek(persistedData, prevNodeOffset, SEEK_SET);
-    fwrite(&newNodeOffset, sizeof(long), 1, persistedData);
-
-    // Save created value by prevs next
-    fseek(persistedData, 0, SEEK_END);
-    fwrite(newNode, sizeof(Node), 1, persistedData);
-}
-
-Node* generateNodeWithData(int seed)
-{
-    Node* newNode = malloc(sizeof(Node));
-    sprintf(newNode->data.szFullName, "Fullname_%d", seed);
-    sprintf(newNode->data.szEmail, "Email_%d", seed);
-    newNode->data.birthdate.sub.day = seed % 29;
-    newNode->data.birthdate.sub.month = seed % 11;
-    newNode->data.birthdate.sub.year = (seed % 60) + 1960;
-    newNode->next = 0;
-
-    return newNode;
-}
-
-void printWithOrderFromTillEnd(FILE *persistedData, long startItemIndex)
-{
-    fseek(persistedData, startItemIndex * sizeof(Node), SEEK_SET);
-    Node nodeBuffer;
-
-    //If there is no node different that root, table is empty. Dont print
-    fread(&nodeBuffer, sizeof(Node), 1, persistedData);
-    if  (nodeBuffer.next==0){
-        return;
+      pthread_mutex_lock(&lock);
+      counter++;
+      printf("Counter increased for new accept: %d\n", counter);
+      pthread_mutex_unlock(&lock);
+      shutdown(iSocketFd, SHUT_RDWR);
+      close(iSocketFd);
+      return NULL;
     }
-
-    //Saved items read loop  
-    do
-    {
-        fseek(persistedData, nodeBuffer.next, SEEK_SET);
-        fread(&nodeBuffer, sizeof(Node), 1, persistedData);
-        printf("Fullname : %s\n", nodeBuffer.data.szFullName);
-        printf("Email : %s\n", nodeBuffer.data.szEmail);
-        printf("Birth Date : %02d/%02d/%d , %d\n\n",
-               nodeBuffer.data.birthdate.sub.day,
-               nodeBuffer.data.birthdate.sub.month,
-               nodeBuffer.data.birthdate.sub.year,
-               nodeBuffer.data.birthdate.dateval);
-
-    } while (nodeBuffer.next != 0);
-}
-
-//Gets last element of linked list
-long iterateFilePointerToLastNode (FILE *persistedData){
-    fseek(persistedData, sizeof(Node), SEEK_SET);
-    long next;
-
-    fread(&next, sizeof(long), 1, persistedData);
-    if  (next==0){
-        return 0;
-    }
-
-    long lastItemIndex;
-    do
-    {
-        lastItemIndex=next;
-        fseek(persistedData, next, SEEK_SET);
-        fread(&next, sizeof(long), 1, persistedData);
-
-    } while (next != 0);
-    return lastItemIndex;
+    szBuffer[size] = '\0';
+    //printf("%s", szBuffer);
+  }
+  return NULL;
 }
 
 int main()
 {
 
-    FILE *persistedData = fopen("./user-table.deondb", "rb+");
+  if (pthread_mutex_init(&lock, NULL) != 0)
+  {
+    perror("Mutex cannot created!");
+    return -1;
+  }
 
-    if(persistedData==NULL){
-        persistedData= fopen("./user-table.deondb", "a");
-        fclose(persistedData);
-        persistedData = fopen("./user-table.deondb", "rb+");
-    }
+  pthread_t tasks[ACTIVE_SOCKET_LIMIT] = {0};
+  int socketfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (socketfd < 1)
+  {
+    perror("socket couldn't created!\n");
+    return -1;
+  }
 
-    fseek(persistedData, 0, SEEK_END);
+  struct sockaddr_in address;
+  address.sin_family = AF_INET;
+  address.sin_port = htons(4002);
+  // 0.0.0.0
+  // 127.0.0.1
+  address.sin_addr.s_addr = INADDR_ANY;
+  unsigned int addressSize = sizeof(address);
 
-    //I am creating root node with 0 values for preventing extra cases about prev node not exist problem if db is empty. I think this is most efficent way for this scenario
-    if (ftell(persistedData) == 0)
+  int opt_val = 1;
+  if (setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, &opt_val, sizeof(opt_val)) < 0)
+  {
+    perror("setsockopt failed!\n");
+    return -1;
+  }
+
+  if (bind(socketfd, (struct sockaddr *)&address, (socklen_t)addressSize) < 0)
+  {
+    perror("socket couldn't binded!\n");
+    return -1;
+  }
+
+  if (listen(socketfd, 10) < 0)
+  {
+    perror("socket couldn't listen!\n");
+    return -1;
+  }
+
+  while (1)
+  {
+    printf("Connection waiting...\n");
+    iaSocketFd[iActiveSocketIndex] = accept(socketfd, (struct sockaddr *)&address, (socklen_t *)&addressSize);
+    if (iaSocketFd[iActiveSocketIndex] < 0)
     {
-        Node rootCleanNode = {0};
-        fwrite(&rootCleanNode, sizeof(Node), 1, persistedData);
+      perror("accept failed!\n");
+      return -1;
     }
+    printf("New connection accepted!\n");
 
-    
-    long offsetIterator = iterateFilePointerToLastNode(persistedData);
-    fseek(persistedData, 0, SEEK_END);
-
-    // Chained seed data generation
-    for (int i = 1; i <= 10; i++)
+    if (pthread_create(
+            &tasks[iActiveSocketIndex],
+            NULL,
+            &handleMessageTask,
+            (void *)(&iaSocketFd[iActiveSocketIndex])) != 0)
     {
-
-        Node* tempNewNode = generateNodeWithData(i);
-        addNodeAfterTargetNode(persistedData, offsetIterator, tempNewNode);
-        free(tempNewNode);
-        offsetIterator = ftell(persistedData) - sizeof(Node);
+      perror("task creation failed!\n");
+      return -1;
     }
-    //Add seed data 16 after fourth node
-    Node* pTempNewNode;
-    pTempNewNode = generateNodeWithData(16);
-    addNodeAfterTargetNode(persistedData, sizeof(Node)*4, pTempNewNode);
-    free(pTempNewNode);
-        //Add seed data 17 after second node
-    pTempNewNode = generateNodeWithData(17);
-    addNodeAfterTargetNode(persistedData, sizeof(Node)*2, pTempNewNode);
-    free(pTempNewNode);
-    printWithOrderFromTillEnd(persistedData, 0);
+    iActiveSocketIndex++;
+  }
 
-    fclose(persistedData);
-    return 0;
+  close(socketfd);
+
+  printf("Hello World!\n");
+  return 0;
 }
